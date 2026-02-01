@@ -1,3 +1,4 @@
+import subprocess
 import shutil
 from pathlib import Path
 import pytesseract
@@ -15,10 +16,30 @@ def detect_uchicago(text):
     match = re.findall(pattern, text)
     return len(match) > 0
 
+def run_cmd(cmd):
+    # run the command 
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    # check the output
+    if result.returncode != 0:
+        raise Exception(f"Error : {result.stderr}")
+
+
 def capture_frame(input_path, output_path, time=1):
     # time is in seconds
+    input_path = str(input_path)
     output_path = str(output_path) # convert path to string
-    ffmpeg.input(input_path, ss=time).output(output_path, frames=1).overwrite_output().run()
+
+    # Build ffmpeg command
+    ffmpeg_cmd = [
+        'ffmpeg',
+        '-ss', str(time),           # Start time
+        '-i', input_path,     # Input file
+        '-frames:v', '1',     # Number of frames to output
+        '-y',                  # Overwrite output files without asking
+        output_path           # Output file
+    ]    
+    run_cmd(ffmpeg_cmd)
 
 if __name__ == "__main__":
     image_dir = Path('./images')

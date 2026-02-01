@@ -3,6 +3,8 @@ import csv
 import json
 import subprocess
 from pathlib import Path
+from helper import capture_frame, detect_text_from_img, run_cmd
+from rich.traceback import install; install()
 
 def get_video_dimensions(video_file_path):
     path = str(video_file_path)
@@ -86,7 +88,7 @@ def concat_video_horizontally(video0, video1, v0_v1_width_ratio=0.3):
     # the height of new video 1 should match the new height of video 2 so it will be padded. Here I am assuming that video 2 is bigger 
     pad_height = new_v1_h
     y_offset = int((pad_height - new_v0_h) / 2)
-    breakpoint()
+
     # Build ffmpeg command
     ffmpeg_cmd = [
         'ffmpeg',
@@ -96,18 +98,12 @@ def concat_video_horizontally(video0, video1, v0_v1_width_ratio=0.3):
         '-filter_complex', f"[1:v]scale={new_v1_w}:{new_v1_h}[v1];[0:v]scale={new_v0_w}:{new_v0_h}[v0_scaled];[v0_scaled]pad={new_v0_w}:{pad_height}:0:{y_offset}:black[v0];[v0][v1]hstack[v]",
         '-map', '[v]',
         '-map', '0:a:0',
-        '-c:v', 'libx264',
+        '-c:v', 'libx265',
         '-c:a', 'aac',
         'output_4.mp4'
     ]
 
-    # run the command 
-    result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-    # check the output
-    if result.returncode != 0:
-        raise Exception(f"Error : {result.stderr}")
-
+    run_cmd(ffmpeg_cmd)
 
 def write_video_duration():
     cwd = Path.cwd()
@@ -121,6 +117,53 @@ def write_video_duration():
         w.write(f'name,duration\n')
         for name, duration in video_duration:
             w.write(f"{name},{duration}\n")
+
+def video_over_video(
+        base_video_path, overlay_video_path, output_path, width_overlay=320, padding=10, position='top-left',
+    ):
+    """
+    This function will overlay one video over the another. The aspect ratio of the overlay video will be preserved. The overlay video will be resized according to the width_overlay parameter. Additionally, some padding will be added. The position parameter can be top-left, top-right, bottom-left and bottom-right.
+
+    The video to be overlayed has a origin system at the top left corner. To the right is positive in x direction; down is positive y direction. The same is true of the background video, it too has an origin system at top left corner. 
+    
+    So,
+    overlay=0:0 -> overlay's top left aligns with background's top left
+    overlay=W-w:0 -> overlay in the top right corner
+    overlay=W-w:H-h -> overlay in the bottom right corner
+    overlay=10:10 -> overlay 10px to the right and 10px down
+
+    The padding is in pixels; default 10 px
+    """
+    x, y = 0, 0
+    match position:
+        case 'top-left':
+            x, y = f"{padding}", f"{padding}"
+        case 'top-right':
+            x, y = f"W-w-{padding}", f"{padding}"
+        case 'bottom-right':
+            x, y = f"W-w-{padding}", f"H-h-{padding}"
+        case 'bottom-left':
+            x, y = f"{padding}", f"H-h-{padding}"
+
+    base_video_path = str(base_video_path) 
+    overlay_video_path = str(overlay_video_path)
+    output_path = str(output_path)
+
+    # Build ffmpeg command
+    ffmpeg_cmd = [
+        'ffmpeg',
+        '-y', # overwrite the file without asking
+        '-i', base_video_path,
+        '-i', overlay_video_path,
+        '-filter_complex', f'[1:v]scale={width_overlay}:-1[v1_scaled];[0:v][v1_scaled]overlay={x}:{y}[v]',
+        '-map', '[v]',
+        '-map', '1:a',
+        '-c:v', 'libx265',
+        '-c:a', 'aac',
+        output_path
+    ]
+
+    run_cmd(ffmpeg_cmd)
 
 def remove_duplicate_videos():
     write_video_duration()
@@ -180,6 +223,46 @@ def make_pairs():
                 unpaired.append(rows[prev])
                 prev = curr
                 curr = prev + 1
+    return paired, unpaired
 
 if __name__ == "__main__":
-    concat_video_horizontally('fragmented.mp4', 'fragmented_2.mp4', 0.4)
+    # remove_duplicate_videos()
+    # write_video_duration()
+    paired, unpaired = make_pairs()
+    
+    # paired is a list of tuples; each tuple is a pair of two and each member is the name of file and the duration, so I need to unrap it to get the names of the videos
+    paired_videos = [(v0[0], v1[0]) for v0, v1 in paired]
+    cwd = Path.cwd()
+    output_dir = Path('./output')
+    images_dir= Path('./images')
+    output_dir.mkdir(exist_ok=True, parents=True)
+    images_dir.mkdir(exist_ok=True, parents=True)
+    _counter = 0
+    for (v0, v1) in paired_videos:
+        # first I need to determine which one is the base video and which one is the overlay. For that I am going to see which one has text in them. This is a simple observation each background video starts with some text, and if the OCR can detect it then it is background video
+        v0_path = cwd / v0
+        v1_path = cwd / v1
+        v0_img_path = images_dir / f"{v0_path.stem}.png"
+        v1_img_path = images_dir / f"{v1_path.stem}.png"
+        capture_frame(v0_path, v0_img_path)
+        capture_frame(v1_path, v1_img_path)
+        v0_text = detect_text_from_img(v0_img_path)
+        v1_text = detect_text_from_img(v1_img_path)
+
+        bg_video, overlay_video = None, None
+        # there are 4 cases but only two are valid v0 can be either background or overlay and v1 must be different from v0
+        if v0_text and not v1_text:
+            bg_video = v0_path
+            overlay_video = v1_path
+        elif not v0_text and v1_text:
+            bg_video = v1_path
+            overlay_video = v0_path
+
+ 
+        if bg_video and overlay_video:
+            output_path = output_dir / f"overlayed_video_{_counter}.mp4"
+            _counter += 1
+            video_over_video(bg_video, overlay_video, output_path, width_overlay=240, padding=15, position='bottom-right')
+
+    # concat_video_horizontally('fragmented.mp4', 'fragmented_2.mp4', 0.3)
+    # video_over_video('fragmented_2.mp4', 'fragmented.mp4', width_overlay=240, position='bottom-right')
