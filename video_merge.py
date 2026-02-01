@@ -60,6 +60,7 @@ def get_video_duration(video_file_path):
     return duration
 
 def _make_even(n):
+    n = int(n) # make integer
     return n if n % 2 == 0 else n - 1
 
 def concat_video_horizontally(video0, video1, v0_v1_width_ratio=0.3):
@@ -119,7 +120,7 @@ def write_video_duration():
             w.write(f"{name},{duration}\n")
 
 def video_over_video(
-        base_video_path, overlay_video_path, output_path, width_overlay=320, padding=10, position='top-left',
+        base_video_path, overlay_video_path, output_path, width_overlay=320, padding=10, position='top-left', ow_by_bw=0.25,
     ):
     """
     This function will overlay one video over the another. The aspect ratio of the overlay video will be preserved. The overlay video will be resized according to the width_overlay parameter. Additionally, some padding will be added. The position parameter can be top-left, top-right, bottom-left and bottom-right.
@@ -149,13 +150,22 @@ def video_over_video(
     overlay_video_path = str(overlay_video_path)
     output_path = str(output_path)
 
+    # scale2ref is not reliable, therefore I will get the true sizes of the videos
+    bv_w, bv_h = get_video_dimensions(base_video_path)
+    
+    # now the math to calcuate the relative width of the ov
+    new_ov_w = bv_w * ow_by_bw # I will also keep the relative size the same while scaling
+    new_ov_w =_make_even(new_ov_w)
+    # build the filter graph
+    filter_graph = f'[1:v]scale={new_ov_w}:-1[v1_scaled];[0:v][v1_scaled]overlay={x}:{y}[v]'
+
     # Build ffmpeg command
     ffmpeg_cmd = [
         'ffmpeg',
         '-y', # overwrite the file without asking
         '-i', base_video_path,
         '-i', overlay_video_path,
-        '-filter_complex', f'[1:v]scale={width_overlay}:-1[v1_scaled];[0:v][v1_scaled]overlay={x}:{y}[v]',
+        '-filter_complex', filter_graph,
         '-map', '[v]',
         '-map', '1:a',
         '-c:v', 'libx265',
@@ -262,7 +272,7 @@ if __name__ == "__main__":
         if bg_video and overlay_video:
             output_path = output_dir / f"overlayed_video_{_counter}.mp4"
             _counter += 1
-            video_over_video(bg_video, overlay_video, output_path, width_overlay=240, padding=15, position='bottom-right')
+            video_over_video(bg_video, overlay_video, output_path, width_overlay=240, padding=15, position='bottom-right', ow_by_bw=0.2)
 
     # concat_video_horizontally('fragmented.mp4', 'fragmented_2.mp4', 0.3)
     # video_over_video('fragmented_2.mp4', 'fragmented.mp4', width_overlay=240, position='bottom-right')

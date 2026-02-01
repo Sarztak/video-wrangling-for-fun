@@ -10,3 +10,6 @@ dependencies = [
     "pytesseract>=0.3.13",
     "rich>=14.3.2",
 ]
+
+[tool.uv.workspace]
+members = ["output/test"]
