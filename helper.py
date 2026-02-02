@@ -4,7 +4,6 @@ from pathlib import Path
 import pytesseract
 from PIL import Image
 import re
-import ffmpeg
 
 def detect_text_from_img(input_path):
     image = Image.open(input_path)
@@ -42,6 +41,7 @@ def capture_frame(input_path, output_path, time=1):
     run_cmd(ffmpeg_cmd)
 
 if __name__ == "__main__":
+    breakpoint()
     image_dir = Path('./images')
     image_dir.mkdir(exist_ok=True, parents=True)
     transfer_dir = Path('./transfer')

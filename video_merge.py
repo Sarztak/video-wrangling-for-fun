@@ -120,7 +120,7 @@ def write_video_duration():
             w.write(f"{name},{duration}\n")
 
 def video_over_video(
-        base_video_path, overlay_video_path, output_path, width_overlay=320, padding=10, position='top-left', ow_by_bw=0.25,
+        base_video_path, overlay_video_path, output_path, padding=10, position='top-left', ow_by_bw=0.25,
     ):
     """
     This function will overlay one video over the another. The aspect ratio of the overlay video will be preserved. The overlay video will be resized according to the width_overlay parameter. Additionally, some padding will be added. The position parameter can be top-left, top-right, bottom-left and bottom-right.
@@ -159,6 +159,7 @@ def video_over_video(
     # build the filter graph
     filter_graph = f'[1:v]scale={new_ov_w}:-1[v1_scaled];[0:v][v1_scaled]overlay={x}:{y}[v]'
 
+
     # Build ffmpeg command
     ffmpeg_cmd = [
         'ffmpeg',
@@ -173,7 +174,10 @@ def video_over_video(
         output_path
     ]
 
-    run_cmd(ffmpeg_cmd)
+    try:
+        run_cmd(ffmpeg_cmd)
+    except Exception:
+        print(f"{base_video_path}, {overlay_video_path} not overlayed :(")
 
 def remove_duplicate_videos():
     write_video_duration()
@@ -235,9 +239,10 @@ def make_pairs():
                 curr = prev + 1
     return paired, unpaired
 
-if __name__ == "__main__":
-    # remove_duplicate_videos()
-    # write_video_duration()
+def create_overlay_from_pairs():
+
+    remove_duplicate_videos()
+    write_video_duration()
     paired, unpaired = make_pairs()
     
     # paired is a list of tuples; each tuple is a pair of two and each member is the name of file and the duration, so I need to unrap it to get the names of the videos
@@ -247,7 +252,8 @@ if __name__ == "__main__":
     images_dir= Path('./images')
     output_dir.mkdir(exist_ok=True, parents=True)
     images_dir.mkdir(exist_ok=True, parents=True)
-    _counter = 0
+    _counter_text_detected = 0 # use this counter when text is detected by OCR 
+    _counter_text_undetected = 0 # use this counter when text is not detected by OCR
     for (v0, v1) in paired_videos:
         # first I need to determine which one is the base video and which one is the overlay. For that I am going to see which one has text in them. This is a simple observation each background video starts with some text, and if the OCR can detect it then it is background video
         v0_path = cwd / v0
@@ -270,9 +276,30 @@ if __name__ == "__main__":
 
  
         if bg_video and overlay_video:
-            output_path = output_dir / f"overlayed_video_{_counter}.mp4"
-            _counter += 1
-            video_over_video(bg_video, overlay_video, output_path, width_overlay=240, padding=15, position='bottom-right', ow_by_bw=0.2)
+            output_path = output_dir / f"overlayed_video_{_counter_text_detected}.mkv"
+            _counter_text_detected += 1
+            video_over_video(bg_video, overlay_video, output_path, padding=10, position='bottom-right', ow_by_bw=0.18)
+        else:
+            # if the text is not detected then I will just create v0 x v1 and v1 x v0 overlay
+            output_path = output_dir / f"overlayed_video_no_text_detect{_counter_text_undetected}_1.mkv"
+            video_over_video(v0_path, v1_path, output_path, padding=10, position='bottom-right', ow_by_bw=0.18)
 
-    # concat_video_horizontally('fragmented.mp4', 'fragmented_2.mp4', 0.3)
-    # video_over_video('fragmented_2.mp4', 'fragmented.mp4', width_overlay=240, position='bottom-right')
+            # use alternate video to overlay
+            output_path = output_dir / f"overlayed_video_no_text_detect{_counter_text_undetected}_2.mkv"
+            video_over_video(v1_path, v0_path, output_path, padding=10, position='bottom-right', ow_by_bw=0.18)
+            _counter_text_undetected += 1
+            print(f"The following were not matched {v0}, {v1} therefore two overlay are created.")
+
+def overlay_unpaired():   
+    # after this for those that were not pairs luckily there were only two videos which upon inspection were actually pairs, but I need to handle them manually
+    paired, unpaired = make_pairs()  
+    bg = 'index (448p)_5.mp4'
+    ov = 'index (480p_aac)_5.mp4'
+    output_dir = Path('./output')
+    output_dir.mkdir(exist_ok=True, parents=True)
+    output_path = output_dir / f"unpaired_1.mkv"
+    video_over_video(bg, ov, output_path, padding=10, position='bottom-right', ow_by_bw=0.18)
+
+if __name__ == "__main__":
+    create_overlay_from_pairs()  
+    overlay_unpaired()
